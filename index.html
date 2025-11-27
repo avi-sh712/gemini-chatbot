@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stateful Chatbot (EC2 + DynamoDB)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .chat-box {
+            height: 450px;
+            overflow-y: auto;
+            border-bottom: 1px solid #e5e7eb;
+            scroll-behavior: smooth;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 font-sans antialiased">
+    <div class="min-h-screen flex items-center justify-center p-4">
+        <div class="w-full max-w-lg bg-white rounded-xl shadow-2xl p-6 md:p-8">
+            <h1 class="text-3xl font-extrabold text-green-600 mb-2">Stateful AWS Chatbot</h1>
+            <p class="text-gray-600 mb-6">EC2 (Compute) using Flask + DynamoDB (Memory)</p>
+
+            <div id="chat-box" class="chat-box space-y-4 p-4 mb-6 bg-gray-50 rounded-lg border border-gray-200">
+                <!-- Initial Message -->
+                <div class="flex justify-start">
+                    <div class="bg-green-100 text-green-800 p-3 rounded-xl rounded-tl-none max-w-xs shadow-md">
+                        Hello! I am a chatbot running on AWS. Tell me your name, and I will try to remember it.
+                    </div>
+                </div>
+            </div>
+
+            <div id="loading-indicator" class="text-center text-sm text-gray-500 hidden mb-4">
+                Bot is asking the Gemini model...
+            </div>
+
+            <div class="flex space-x-2">
+                <input
+                    type="text"
+                    id="user-input"
+                    placeholder="Type your message here..."
+                    class="flex-1 p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 transition"
+                    onkeydown="if(event.key === 'Enter') sendMessage()"
+                >
+                <button
+                    id="send-button"
+                    onclick="sendMessage()"
+                    class="bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-6 rounded-lg transition duration-200 shadow-md hover:shadow-lg disabled:opacity-50"
+                >
+                    Send
+                </button>
+            </div>
+            <p class="text-xs text-gray-400 mt-2">
+                Session ID (DynamoDB Key): <span id="session-display">{{ session_id }}</span>
+            </p>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('session-display').textContent = "{{ session_id }}";
+        const chatBox = document.getElementById('chat-box');
+        const userInput = document.getElementById('user-input');
+        const sendButton = document.getElementById('send-button');
+        const loadingIndicator = document.getElementById('loading-indicator');
+
+        function appendMessage(sender, text) {
+            const messageDiv = document.createElement('div');
+            const innerDiv = document.createElement('div');
+
+            if (sender === 'user') {
+                messageDiv.className = 'flex justify-end';
+                innerDiv.className = 'bg-gray-800 text-white p-3 rounded-xl rounded-br-none max-w-sm shadow-md whitespace-pre-wrap';
+            } else {
+                messageDiv.className = 'flex justify-start';
+                innerDiv.className = 'bg-green-100 text-green-800 p-3 rounded-xl rounded-tl-none max-w-sm shadow-md whitespace-pre-wrap';
+            }
+
+            // Basic text sanitization to render newlines
+            const safeText = text.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            innerDiv.innerHTML = safeText.replace(/\n/g, '<br>');
+
+            messageDiv.appendChild(innerDiv);
+            chatBox.appendChild(messageDiv);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        async function sendMessage() {
+            const prompt = userInput.value.trim();
+            if (!prompt) return;
+
+            // Disable input and show loading
+            userInput.value = '';
+            userInput.disabled = true;
+            sendButton.disabled = true;
+            loadingIndicator.classList.remove('hidden');
+
+            appendMessage('user', prompt);
+
+            try {
+                const response = await fetch('/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ prompt: prompt })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    appendMessage('agent', data.response);
+                } else {
+                    appendMessage('agent', `SERVER ERROR: ${data.error || 'The EC2 server returned an error.'}`);
+                }
+
+            } catch (error) {
+                console.error('Fetch error:', error);
+                appendMessage('agent', 'NETWORK ERROR: Could not connect to the EC2 backend.');
+            } finally {
+                // Re-enable input and hide loading
+                userInput.disabled = false;
+                sendButton.disabled = false;
+                loadingIndicator.classList.add('hidden');
+                userInput.focus();
+            }
+        }
+    </script>
+</body>
+</html>
